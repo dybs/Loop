@@ -9,6 +9,7 @@ import LoopKit
 import CGMBLEKit
 import G4ShareSpy
 import ShareClient
+import SpikeClient
 import MockKit
 
 
@@ -17,6 +18,7 @@ let allCGMManagers: [CGMManager.Type] = [
     G5CGMManager.self,
     G4CGMManager.self,
     ShareClientManager.self,
+    SpikeClientManager.self,
     MockCGMManager.self,
 ]
 
