@@ -1,4 +1,4 @@
-# Loop for iOS
+# Loop for iOS (Personlized for RKL)
 
 ![App Icon](/Loop/Assets.xcassets/AppIcon.appiconset/Icon-Small-40%402x.png?raw=true)
 
@@ -37,3 +37,9 @@ For FAQs and other tips, refer to the [Wiki](https://github.com/LoopKit/Loop/wik
 # License and Code of Conduct
 
 Please read the [LICENSE](/LICENSE.md) and [CODE_OF_CONDUCT](/CODE_OF_CONDUCT.md)
+
+# RKL Customizations
+
+This fork/branch of Loop contains some personalized settings for RKL's use:
+* Added foreground timer for pump simulator to fake a BLE heartbeat so Loop can be tested with Dexcom Share and no RileyLink
+* Reduced DIA
