@@ -1,4 +1,4 @@
-# Loop for iOS
+# Loop for iOS (RKL settings only)
 
 ![App Icon](/Loop/Assets.xcassets/AppIcon.appiconset/Icon-Small-40%402x.png?raw=true)
 
@@ -37,3 +37,10 @@ For FAQs and other tips, refer to the [Wiki](https://github.com/LoopKit/Loop/wik
 # License and Code of Conduct
 
 Please read the [LICENSE](/LICENSE.md) and [CODE_OF_CONDUCT](/CODE_OF_CONDUCT.md)
+
+# RKL Settings
+
+This branch includes only the customized settings for RKL's use.
+* Reduced DIA
+
+This does not include any other testing customizations.  The branch actually used for Looping is RKL-use.
