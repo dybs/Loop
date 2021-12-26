@@ -300,7 +300,7 @@ final class StatusTableViewController: ChartsTableViewController {
         reloading = true
 
         let reloadGroup = DispatchGroup()
-        var newRecommendedTempBasal: (recommendation: TempBasalRecommendation, date: Date)?
+        var newRecommendedTempBasal: (recommendation: AutomaticDoseRecommendation, date: Date)?
         var glucoseValues: [StoredGlucoseSample]?
         var predictedGlucoseValues: [GlucoseValue]?
         var iobValues: [InsulinValue]?
@@ -313,7 +313,7 @@ final class StatusTableViewController: ChartsTableViewController {
         // TODO: Don't always assume currentContext.contains(.status)
         reloadGroup.enter()
         self.deviceManager.loopManager.getLoopState { (manager, state) -> Void in
-            predictedGlucoseValues = state.predictedGlucose ?? []
+            predictedGlucoseValues = state.predictedGlucoseIncludingPendingInsulin ?? []
 
             // Retry this refresh again if predicted glucose isn't available
             if state.predictedGlucose == nil {
@@ -347,14 +347,16 @@ final class StatusTableViewController: ChartsTableViewController {
                 lastLoopCompleted! < Date(timeIntervalSinceNow: .minutes(-6)) ||
                 !manager.settings.dosingEnabled
             {
-                newRecommendedTempBasal = state.recommendedTempBasal
+                newRecommendedTempBasal = state.recommendedAutomaticDose
             }
 
             if currentContext.contains(.carbs) {
                 reloadGroup.enter()
                 manager.carbStore.getCarbsOnBoardValues(start: startDate, effectVelocities: manager.settings.dynamicCarbAbsorptionEnabled ? state.insulinCounteractionEffects : nil) { (values) in
-                    cobValues = values
-                    reloadGroup.leave()
+                    DispatchQueue.main.async {
+                        cobValues = values
+                        reloadGroup.leave()
+                    }
                 }
             }
 
@@ -364,49 +366,57 @@ final class StatusTableViewController: ChartsTableViewController {
         if currentContext.contains(.glucose) {
             reloadGroup.enter()
             self.deviceManager.loopManager.glucoseStore.getCachedGlucoseSamples(start: startDate) { (values) -> Void in
-                glucoseValues = values
-                reloadGroup.leave()
+                DispatchQueue.main.async {
+                    glucoseValues = values
+                    reloadGroup.leave()
+                }
             }
         }
 
         if currentContext.contains(.insulin) {
             reloadGroup.enter()
             deviceManager.loopManager.doseStore.getInsulinOnBoardValues(start: startDate) { (result) -> Void in
-                switch result {
-                case .failure(let error):
-                    self.log.error("DoseStore failed to get insulin on board values: %{public}@", String(describing: error))
-                    retryContext.update(with: .insulin)
-                    iobValues = []
-                case .success(let values):
-                    iobValues = values
+                DispatchQueue.main.async {
+                    switch result {
+                    case .failure(let error):
+                        self.log.error("DoseStore failed to get insulin on board values: %{public}@", String(describing: error))
+                        retryContext.update(with: .insulin)
+                        iobValues = []
+                    case .success(let values):
+                        iobValues = values
+                    }
+                    reloadGroup.leave()
                 }
-                reloadGroup.leave()
             }
 
             reloadGroup.enter()
             deviceManager.loopManager.doseStore.getNormalizedDoseEntries(start: startDate) { (result) -> Void in
-                switch result {
-                case .failure(let error):
-                    self.log.error("DoseStore failed to get normalized dose entries: %{public}@", String(describing: error))
-                    retryContext.update(with: .insulin)
-                    doseEntries = []
-                case .success(let doses):
-                    doseEntries = doses
+                DispatchQueue.main.async {
+                    switch result {
+                    case .failure(let error):
+                        self.log.error("DoseStore failed to get normalized dose entries: %{public}@", String(describing: error))
+                        retryContext.update(with: .insulin)
+                        doseEntries = []
+                    case .success(let doses):
+                        doseEntries = doses
+                    }
+                    reloadGroup.leave()
                 }
-                reloadGroup.leave()
             }
 
             reloadGroup.enter()
             deviceManager.loopManager.doseStore.getTotalUnitsDelivered(since: Calendar.current.startOfDay(for: Date())) { (result) in
-                switch result {
-                case .failure:
-                    retryContext.update(with: .insulin)
-                    totalDelivery = nil
-                case .success(let total):
-                    totalDelivery = total.value
-                }
+                DispatchQueue.main.async {
+                    switch result {
+                    case .failure:
+                        retryContext.update(with: .insulin)
+                        totalDelivery = nil
+                    case .success(let total):
+                        totalDelivery = total.value
+                    }
 
-                reloadGroup.leave()
+                    reloadGroup.leave()
+                }
             }
         }
 
@@ -487,13 +497,14 @@ final class StatusTableViewController: ChartsTableViewController {
                     hudView.glucoseHUD.setGlucoseQuantity(glucose.quantity.doubleValue(for: unit),
                         at: glucose.startDate,
                         unit: unit,
+                        staleGlucoseAge: self.deviceManager.loopManager.settings.inputDataRecencyInterval,
                         sensor: self.deviceManager.sensorState
                     )
                 }
             }
 
             // Show/hide the table view rows
-            let statusRowMode = self.determineStatusRowMode(recommendedTempBasal: newRecommendedTempBasal)
+            let statusRowMode = self.determineStatusRowMode(recommendedDose: newRecommendedTempBasal)
 
             self.updateHUDandStatusRows(statusRowMode: statusRowMode, newSize: currentContext.newSize, animated: animated)
 
@@ -558,7 +569,7 @@ final class StatusTableViewController: ChartsTableViewController {
 
     private enum StatusRowMode {
         case hidden
-        case recommendedTempBasal(tempBasal: TempBasalRecommendation, at: Date, enacting: Bool)
+        case recommendedDose(dose: AutomaticDoseRecommendation, at: Date, enacting: Bool)
         case scheduleOverrideEnabled(TemporaryScheduleOverride)
         case enactingBolus
         case bolusing(dose: DoseEntry)
@@ -577,7 +588,7 @@ final class StatusTableViewController: ChartsTableViewController {
 
     private var statusRowMode = StatusRowMode.hidden
 
-    private func determineStatusRowMode(recommendedTempBasal: (recommendation: TempBasalRecommendation, date: Date)? = nil) -> StatusRowMode {
+    private func determineStatusRowMode(recommendedDose: (recommendation: AutomaticDoseRecommendation, date: Date)? = nil) -> StatusRowMode {
         let statusRowMode: StatusRowMode
 
         if case .initiating = bolusState {
@@ -590,8 +601,8 @@ final class StatusTableViewController: ChartsTableViewController {
             statusRowMode = .pumpSuspended(resuming: true)
         } else if case .inProgress(let dose) = bolusState, dose.endDate.timeIntervalSinceNow > 0 {
             statusRowMode = .bolusing(dose: dose)
-        } else if let (recommendation: tempBasal, date: date) = recommendedTempBasal {
-            statusRowMode = .recommendedTempBasal(tempBasal: tempBasal, at: date, enacting: false)
+        } else if let (recommendation: dose, date: date) = recommendedDose {
+            statusRowMode = .recommendedDose(dose: dose, at: date, enacting: false)
         } else if let scheduleOverride = deviceManager.loopManager.settings.scheduleOverride,
             scheduleOverride.context != .preMeal && scheduleOverride.context != .legacyWorkout,
             !scheduleOverride.hasFinished()
@@ -635,15 +646,15 @@ final class StatusTableViewController: ChartsTableViewController {
         switch (statusWasVisible, statusIsVisible) {
         case (true, true):
             switch (oldStatusRowMode, self.statusRowMode) {
-            case (.recommendedTempBasal(tempBasal: let oldTempBasal, at: let oldDate, enacting: let wasEnacting),
-                  .recommendedTempBasal(tempBasal: let newTempBasal, at: let newDate, enacting: let isEnacting)):
+            case (.recommendedDose(dose: let oldDose, at: let oldDate, enacting: let wasEnacting),
+                  .recommendedDose(dose: let newDose, at: let newDate, enacting: let isEnacting)):
                 // Ensure we have a change
-                guard oldTempBasal != newTempBasal || oldDate != newDate || wasEnacting != isEnacting else {
+                guard oldDose != newDose || oldDate != newDate || wasEnacting != isEnacting else {
                     break
                 }
 
                 // If the rate or date change, reload the row
-                if oldTempBasal != newTempBasal || oldDate != newDate {
+                if oldDose != newDose || oldDate != newDate {
                     self.tableView.reloadRows(at: [statusIndexPath], with: animated ? .fade : .none)
                 } else if let cell = tableView.cellForRow(at: statusIndexPath) {
                     // If only the enacting state changed, update the activity indicator
@@ -798,14 +809,28 @@ final class StatusTableViewController: ChartsTableViewController {
                     cell.subtitleLabel?.text = nil
                     cell.accessoryView = nil
                     return cell
-                case .recommendedTempBasal(tempBasal: let tempBasal, at: let date, enacting: let enacting):
+                case .recommendedDose(dose: let dose, at: let date, enacting: let enacting):
                     let cell = getTitleSubtitleCell()
                     let timeFormatter = DateFormatter()
                     timeFormatter.dateStyle = .none
                     timeFormatter.timeStyle = .short
 
-                    cell.titleLabel.text = NSLocalizedString("Recommended Basal", comment: "The title of the cell displaying a recommended temp basal value")
-                    cell.subtitleLabel?.text = String(format: NSLocalizedString("%1$@ U/hour @ %2$@", comment: "The format for recommended temp basal rate and time. (1: localized rate number)(2: localized time)"), NumberFormatter.localizedString(from: NSNumber(value: tempBasal.unitsPerHour), number: .decimal), timeFormatter.string(from: date))
+                    //cell.titleLabel.text = NSLocalizedString("Recommended Dose", comment: "The title of the cell displaying a recommended dose")
+                    
+                    var text: String
+
+                    if let basalAdjustment = dose.basalAdjustment, dose.bolusUnits == 0 {
+                        cell.titleLabel.text = NSLocalizedString("Recommended Basal", comment: "The title of the cell displaying a recommended temp basal value")
+                        text = String(format: NSLocalizedString("%1$@ U/hour", comment: "The format for recommended temp basal rate and time. (1: localized rate number)"), NumberFormatter.localizedString(from: NSNumber(value: basalAdjustment.unitsPerHour), number: .decimal))
+                    } else {
+                        let bolusUnitsStr = quantityFormatter.string(from: HKQuantity(unit: .internationalUnit(), doubleValue: dose.bolusUnits), for: .internationalUnit()) ?? ""
+                        cell.titleLabel.text = NSLocalizedString("Recommended Auto-Bolus", comment: "The title of the cell displaying a recommended automatic bolus value")
+                        text = String(format: NSLocalizedString("%1$@ ", comment: "The format for recommended bolus string.  (1: localized bolus volume)" ), bolusUnitsStr)
+                    }
+                    text += String(format: NSLocalizedString(" @ %1$@", comment: "The format for dose recommendation time. (1: localized time)"), timeFormatter.string(from: date))
+                    
+                    cell.subtitleLabel.text = text
+
                     cell.selectionStyle = .default
 
                     if enacting {
@@ -971,10 +996,10 @@ final class StatusTableViewController: ChartsTableViewController {
                 tableView.deselectRow(at: indexPath, animated: true)
 
                 switch statusRowMode {
-                case .recommendedTempBasal(tempBasal: let tempBasal, at: let date, enacting: let enacting) where !enacting:
-                    self.updateHUDandStatusRows(statusRowMode: .recommendedTempBasal(tempBasal: tempBasal, at: date, enacting: true), newSize: nil, animated: true)
+                case .recommendedDose(dose: let dose, at: let date, enacting: let enacting) where !enacting:
+                    self.updateHUDandStatusRows(statusRowMode: .recommendedDose(dose: dose, at: date, enacting: true), newSize: nil, animated: true)
 
-                    self.deviceManager.loopManager.enactRecommendedTempBasal { (error) in
+                    self.deviceManager.loopManager.enactRecommendedDose { (error) in
                         DispatchQueue.main.async {
                             self.updateHUDandStatusRows(statusRowMode: .hidden, newSize: nil, animated: true)
 
@@ -1045,7 +1070,7 @@ final class StatusTableViewController: ChartsTableViewController {
     override func restoreUserActivityState(_ activity: NSUserActivity) {
         switch activity.activityType {
         case NSUserActivity.newCarbEntryActivityType:
-            performSegue(withIdentifier: CarbEntryEditViewController.className, sender: activity)
+            performSegue(withIdentifier: CarbEntryViewController.className, sender: activity)
         default:
             break
         }
@@ -1064,10 +1089,9 @@ final class StatusTableViewController: ChartsTableViewController {
         case let vc as CarbAbsorptionViewController:
             vc.deviceManager = deviceManager
             vc.hidesBottomBarWhenPushed = true
-        case let vc as CarbEntryTableViewController:
-            vc.carbStore = deviceManager.loopManager.carbStore
-            vc.hidesBottomBarWhenPushed = true
-        case let vc as CarbEntryEditViewController:
+        case let vc as CarbEntryViewController:
+            vc.deviceManager = deviceManager
+            vc.glucoseUnit = statusCharts.glucose.glucoseUnit
             vc.defaultAbsorptionTimes = deviceManager.loopManager.carbStore.defaultAbsorptionTimes
             vc.preferredUnit = deviceManager.loopManager.carbStore.preferredUnit
 
@@ -1078,10 +1102,10 @@ final class StatusTableViewController: ChartsTableViewController {
             vc.doseStore = deviceManager.loopManager.doseStore
             vc.hidesBottomBarWhenPushed = true
         case let vc as BolusViewController:
-            vc.configureWithLoopManager(self.deviceManager.loopManager,
-                recommendation: sender as? BolusRecommendation,
-                glucoseUnit: self.statusCharts.glucose.glucoseUnit
-            )
+            vc.deviceManager = deviceManager
+            vc.glucoseUnit = statusCharts.glucose.glucoseUnit
+            vc.configuration = .manualCorrection
+            AnalyticsManager.shared.didDisplayBolusScreen()
         case let vc as OverrideSelectionViewController:
             if deviceManager.loopManager.settings.futureOverrideEnabled() {
                 vc.scheduledOverride = deviceManager.loopManager.settings.scheduleOverride
@@ -1098,46 +1122,43 @@ final class StatusTableViewController: ChartsTableViewController {
         }
     }
 
-    /// Unwind segue action from the CarbEntryEditViewController
-    ///
-    /// - parameter segue: The unwind segue
-    @IBAction func unwindFromEditing(_ segue: UIStoryboardSegue) {
-        guard let carbVC = segue.source as? CarbEntryEditViewController, let updatedEntry = carbVC.updatedCarbEntry else {
+    @IBAction func unwindFromEditing(_ segue: UIStoryboardSegue) {}
+
+    @IBAction func unwindFromBolusViewController(_ segue: UIStoryboardSegue) {
+        guard let bolusViewController = segue.source as? BolusViewController else {
             return
         }
 
-        if #available(iOS 12.0, *) {
-            let interaction = INInteraction(intent: NewCarbEntryIntent(), response: nil)
-            interaction.donate { [weak self] (error) in
-                if let error = error {
-                    self?.log.error("Failed to donate intent: %{public}@", String(describing: error))
-                }
-            }
-        }
-        deviceManager.loopManager.addCarbEntryAndRecommendBolus(updatedEntry) { (result) -> Void in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let recommendation):
-                    if self.active && self.visible, let bolus = recommendation?.amount, bolus > 0 {
-                        self.performSegue(withIdentifier: BolusViewController.className, sender: recommendation)
-                    }
-                case .failure(let error):
-                    // Ignore bolus wizard errors
-                    if error is CarbStore.CarbStoreError {
-                        self.present(UIAlertController(with: error), animated: true)
-                    } else {
-                        self.log.error("Failed to add carb entry: %{public}@", String(describing: error))
+        if let carbEntry = bolusViewController.updatedCarbEntry {
+            if #available(iOS 12.0, *) {
+                let interaction = INInteraction(intent: NewCarbEntryIntent(), response: nil)
+                interaction.donate { [weak self] (error) in
+                    if let error = error {
+                        self?.log.error("Failed to donate intent: %{public}@", String(describing: error))
                     }
                 }
             }
-        }
-    }
 
-    @IBAction func unwindFromBolusViewController(_ segue: UIStoryboardSegue) {
-        if let bolusViewController = segue.source as? BolusViewController {
-            if let bolus = bolusViewController.bolus, bolus > 0 {
-                deviceManager.enactBolus(units: bolus) { (_) in }
+            deviceManager.loopManager.addCarbEntryAndRecommendBolus(carbEntry) { result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success:
+                        // Enact the user-entered bolus
+                        if let bolus = bolusViewController.bolus, bolus > 0 {
+                            self.deviceManager.enactBolus(units: bolus) { _ in }
+                        }
+                    case .failure(let error):
+                        // Ignore bolus wizard errors
+                        if error is CarbStore.CarbStoreError {
+                            self.present(UIAlertController(with: error), animated: true)
+                        } else {
+                            self.log.error("Failed to add carb entry: %{public}@", String(describing: error))
+                        }
+                    }
+                }
             }
+        } else if let bolus = bolusViewController.bolus, bolus > 0 {
+            self.deviceManager.enactBolus(units: bolus) { _ in }
         }
     }
 
@@ -1262,13 +1283,23 @@ final class StatusTableViewController: ChartsTableViewController {
     }
 
     @objc private func showLastError(_: Any) {
+        var error: Error? = nil
         // First, check whether we have a device error after the most recent completion date
         if let deviceError = deviceManager.lastError,
             deviceError.date > (hudView?.loopCompletionHUD.lastLoopCompleted ?? .distantPast)
         {
-            self.present(UIAlertController(with: deviceError.error), animated: true)
+            error = deviceError.error
         } else if let lastLoopError = lastLoopError {
-            self.present(UIAlertController(with: lastLoopError), animated: true)
+            error = lastLoopError
+        }
+
+        if error != nil {
+            let alertController = UIAlertController(with: error!)
+            let manualLoopAction = UIAlertAction(title: NSLocalizedString("Retry", comment: "The button text for attempting a manual loop"), style: .default, handler: { _ in
+                self.deviceManager.refreshDeviceData()
+            })
+            alertController.addAction(manualLoopAction)
+            present(alertController, animated: true)
         }
     }
 

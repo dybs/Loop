@@ -1,7 +1,7 @@
-github "dybs/LoopKit"  "pump-sim-timer-master"
-github "dybs/CGMBLEKit" "pump-sim-timer-master"
+github "LoopKit/LoopKit" "loop-release/v2.2.5"
+github "LoopKit/CGMBLEKit" "loop-release/v2.2.5"
 github "i-schuetz/SwiftCharts" == 0.6.5
-github "dybs/dexcom-share-client-swift" "pump-sim-timer-master"
-github "dybs/G4ShareSpy" "pump-sim-timer-master"
-github "dybs/rileylink_ios" "pump-sim-timer-master"
-github "LoopKit/Amplitude-iOS" "decreepify"
+github "LoopKit/dexcom-share-client-swift" "loop-release/v2.2.5"
+github "LoopKit/G4ShareSpy" "loop-release/v2.2.5"
+github "ps2/rileylink_ios" "loop-release/v2.2.5"
+github "LoopKit/Amplitude-iOS" "main"

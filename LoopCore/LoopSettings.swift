@@ -8,6 +8,40 @@
 import LoopKit
 import HealthKit
 
+public enum DosingStrategy: Int, CaseIterable {
+    case tempBasalOnly
+    case automaticBolus
+}
+
+public extension DosingStrategy {
+    var title: String {
+        switch self {
+        case .tempBasalOnly:
+            return NSLocalizedString("Temp Basal Only", comment: "Title string for temp basal only dosing strategy")
+        case .automaticBolus:
+            return NSLocalizedString("Automatic Bolus", comment: "Title string for automatic bolus dosing strategy")
+        }
+    }
+
+    var fullTitle: String {
+        switch self {
+        case .automaticBolus:
+            return NSLocalizedString("Automatic Bolus (Experimental)", comment: "Title string for automatic bolus dosing strategy")
+        default:
+            return title
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .tempBasalOnly:
+            return NSLocalizedString("Loop will dose insulin using 30 minute temporary basal rates, limited by your max temp basal setting. This is the same strategy that Loop used in previous versions.", comment: "Description string for temp basal only dosing strategy")
+        case .automaticBolus:
+            return NSLocalizedString("Loop will automatically bolus when bg is predicted to be higher than target range, and will use temp basals when bg is predicted to be lower than target range. Please use caution when selecting this option for the first time. You may need re-evaluate your settings, even if you have been having success with those settings when using Loop's original temp basal strategy.", comment: "Description string for automatic bolus dosing strategy")
+        }
+    }
+}
+
 public struct LoopSettings: Equatable {
     public var dosingEnabled = false
 
@@ -32,18 +66,27 @@ public struct LoopSettings: Equatable {
     public var suspendThreshold: GlucoseThreshold? = nil
 
     public let retrospectiveCorrectionEnabled = true
+    
+    public var dosingStrategy: DosingStrategy = .tempBasalOnly
 
     /// The interval over which to aggregate changes in glucose for retrospective correction
     public let retrospectiveCorrectionGroupingInterval = TimeInterval(minutes: 30)
 
-    /// The amount of time since a given date that data should be considered valid
-    public let recencyInterval = TimeInterval(minutes: 15)
+    /// The amount of time since a given date that input data should be considered valid
+    public let inputDataRecencyInterval = TimeInterval(minutes: 15)
+    
+    /// Loop completion aging category limits
+    public let completionFreshLimit = TimeInterval(minutes: 6)
+    public let completionAgingLimit = TimeInterval(minutes: 16)
+    public let completionStaleLimit = TimeInterval(hours: 12)
 
     public let batteryReplacementDetectionThreshold = 0.5
 
     public let defaultWatchCarbPickerValue = 15 // grams
 
     public let defaultWatchBolusPickerValue = 1.0 // %
+    
+    public let bolusPartialApplicationFactor = 0.4 // %
 
     // MARK - Display settings
 
@@ -229,6 +272,12 @@ extension LoopSettings: RawRepresentable {
         if let rawThreshold = rawValue["minimumBGGuard"] as? GlucoseThreshold.RawValue {
             self.suspendThreshold = GlucoseThreshold(rawValue: rawThreshold)
         }
+        
+        if let rawDosingStrategy = rawValue["dosingStrategy"] as? DosingStrategy.RawValue,
+            let dosingStrategy = DosingStrategy(rawValue: rawDosingStrategy) {
+            self.dosingStrategy = dosingStrategy
+        }
+
     }
 
     public var rawValue: RawValue {
@@ -245,6 +294,7 @@ extension LoopSettings: RawRepresentable {
         raw["maximumBasalRatePerHour"] = maximumBasalRatePerHour
         raw["maximumBolus"] = maximumBolus
         raw["minimumBGGuard"] = suspendThreshold?.rawValue
+        raw["dosingStrategy"] = dosingStrategy.rawValue
 
         return raw
     }
