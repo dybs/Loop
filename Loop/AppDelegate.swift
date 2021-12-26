@@ -50,11 +50,11 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         
         NotificationManager.authorize(delegate: self)
  
-        let mainStatusViewControllers = UIStoryboard(name: "Main", bundle: Bundle(for: AppDelegate.self)).instantiateViewController(withIdentifier: "MainStatusViewController") as! StatusTableViewController
+        let mainStatusViewController = UIStoryboard(name: "Main", bundle: Bundle(for: AppDelegate.self)).instantiateViewController(withIdentifier: "MainStatusViewController") as! StatusTableViewController
         
-        rootViewController.pushViewController(mainStatusViewControllers, animated: false)
-
-        rootViewController.rootViewController.deviceManager = deviceManager
+        mainStatusViewController.deviceManager = deviceManager
+        
+        rootViewController.pushViewController(mainStatusViewController, animated: false)
         
     }
 
@@ -93,6 +93,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
+        ProfileExpirationAlerter.alertIfNeeded(viewControllerToPresentFrom: rootViewController)
         deviceManager?.updatePumpManagerBLEHeartbeatPreference()
     }
 

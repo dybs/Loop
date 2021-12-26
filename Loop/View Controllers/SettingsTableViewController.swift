@@ -70,6 +70,7 @@ final class SettingsTableViewController: UITableViewController {
         case basalRate
         case deliveryLimits
         case insulinModel
+        case dosingStrategy
         case carbRatio
         case insulinSensitivity
     }
@@ -100,6 +101,9 @@ final class SettingsTableViewController: UITableViewController {
                 vc.insulinSensitivitySchedule = insulinSensitivitySchedule
             }
 
+            vc.delegate = self
+        case let vc as DosingStrategySelectionViewController:
+            vc.dosingStrategy = dataManager.loopManager.settings.dosingStrategy
             vc.delegate = self
         default:
             break
@@ -265,6 +269,9 @@ final class SettingsTableViewController: UITableViewController {
                 } else {
                     configCell.detailTextLabel?.text = SettingsTableViewCell.TapToSetString
                 }
+            case .dosingStrategy:
+                configCell.textLabel?.text = NSLocalizedString("Dosing Strategy", comment: "The title text for the dosing strategy setting row")
+                configCell.detailTextLabel?.text = dataManager.loopManager.settings.dosingStrategy.title
             case .deliveryLimits:
                 configCell.textLabel?.text = NSLocalizedString("Delivery Limits", comment: "Title text for delivery limits")
 
@@ -507,6 +514,8 @@ final class SettingsTableViewController: UITableViewController {
                 }
             case .insulinModel:
                 performSegue(withIdentifier: InsulinModelSettingsViewController.className, sender: sender)
+            case .dosingStrategy:
+                performSegue(withIdentifier: DosingStrategySelectionViewController.className, sender: sender)
             case .deliveryLimits:
                 let vc = DeliveryLimitSettingsTableViewController(style: .grouped)
 
@@ -521,6 +530,16 @@ final class SettingsTableViewController: UITableViewController {
             case .basalRate:
                 guard let pumpManager = dataManager.pumpManager else {
                     // Not allowing basal schedule entry without a configured pump.
+                    let alert = UIAlertController(
+                        title: NSLocalizedString("Unconfigured Pump", comment: "Alert title for unconfigured pump"),
+                        message: NSLocalizedString("Please configure a pump to view or edit scheduled basal rates.", comment: "Alert message for attempting to change basal rates before pump was configured."),
+                        preferredStyle: .alert
+                    )
+
+                    let acknowledgeChange = UIAlertAction(title: NSLocalizedString("OK", comment: "Button text to dismiss unconfigured pump alert."), style: .default) { _ in }
+                    alert.addAction(acknowledgeChange)
+
+                    present(alert, animated: true)
                     tableView.deselectRow(at: indexPath, animated: true)
                     return
                 }
@@ -772,6 +791,30 @@ extension SettingsTableViewController: InsulinModelSettingsViewControllerDelegat
             case .insulinModel:
                 if let model = controller.insulinModel {
                     dataManager.loopManager.insulinModelSettings = InsulinModelSettings(model: model)
+                }
+
+                tableView.reloadRows(at: [indexPath], with: .none)
+            default:
+                assertionFailure()
+            }
+        default:
+            assertionFailure()
+        }
+    }
+}
+
+extension SettingsTableViewController: DosingStrategySelectionViewControllerDelegate {
+    func dosingStrategySelectionViewControllerDidChangeValue(_ controller: DosingStrategySelectionViewController) {
+        guard let indexPath = self.tableView.indexPathForSelectedRow else {
+            return
+        }
+
+        switch sections[indexPath.section] {
+        case .configuration:
+            switch ConfigurationRow(rawValue: indexPath.row)! {
+            case .dosingStrategy:
+                if let strategy = controller.dosingStrategy {
+                    dataManager.loopManager.settings.dosingStrategy = strategy
                 }
 
                 tableView.reloadRows(at: [indexPath], with: .none)

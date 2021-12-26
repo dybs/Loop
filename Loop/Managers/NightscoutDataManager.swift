@@ -178,8 +178,8 @@ final class NightscoutDataManager {
             recommendedBolus = state.recommendedBolus?.recommendation.amount
 
             let carbsOnBoard = state.carbsOnBoard
-            let predictedGlucose = state.predictedGlucose
-            let recommendedTempBasal = state.recommendedTempBasal
+            let predictedGlucose = state.predictedGlucoseIncludingPendingInsulin
+            let recommendedTempBasal = state.recommendedAutomaticDose
 
             manager.doseStore.insulinOnBoard(at: Date()) { (result) in
                 let insulinOnBoard: InsulinValue?
@@ -199,8 +199,8 @@ final class NightscoutDataManager {
                     insulinOnBoard: insulinOnBoard,
                     carbsOnBoard: carbsOnBoard,
                     predictedGlucose: predictedGlucose,
-                    recommendedTempBasal: recommendedTempBasal,
-                    recommendedBolus: recommendedBolus,
+                    recommendedAutomaticDose: recommendedTempBasal,
+                    recommendedManualBolus: recommendedBolus,
                     loopError: loopError
                 )
 
@@ -219,8 +219,8 @@ final class NightscoutDataManager {
         insulinOnBoard: InsulinValue? = nil,
         carbsOnBoard: CarbValue? = nil,
         predictedGlucose: [GlucoseValue]? = nil,
-        recommendedTempBasal: (recommendation: TempBasalRecommendation, date: Date)? = nil,
-        recommendedBolus: Double? = nil,
+        recommendedAutomaticDose: (recommendation: AutomaticDoseRecommendation, date: Date)? = nil,
+        recommendedManualBolus: Double? = nil,
         loopError: Error? = nil)
     {
 
@@ -255,9 +255,9 @@ final class NightscoutDataManager {
         }
 
         let recommended: RecommendedTempBasal?
-
-        if let (recommendation: recommendation, date: date) = recommendedTempBasal {
-            recommended = RecommendedTempBasal(timestamp: date, rate: recommendation.unitsPerHour, duration: recommendation.duration)
+        
+        if let (recommendation: recommendation, date: date) = recommendedAutomaticDose, let basalAdjustment = recommendation.basalAdjustment {
+            recommended = RecommendedTempBasal(timestamp: date, rate: basalAdjustment.unitsPerHour, duration: basalAdjustment.duration)
         } else {
             recommended = nil
         }
@@ -277,7 +277,7 @@ final class NightscoutDataManager {
 
         //this is the only pill that has the option to modify the text
         //to do that pass a different name value instead of loopName
-        let loopStatus = LoopStatus(name: loopName, version: loopVersion, timestamp: statusTime, iob: iob, cob: cob, predicted: predicted, recommendedTempBasal: recommended, recommendedBolus: recommendedBolus, enacted: loopEnacted, failureReason: loopError)
+        let loopStatus = LoopStatus(name: loopName, version: loopVersion, timestamp: statusTime, iob: iob, cob: cob, predicted: predicted, recommendedTempBasal: recommended, recommendedBolus: recommendedManualBolus, enacted: loopEnacted, failureReason: loopError)
 
         let pumpStatus: NightscoutUploadKit.PumpStatus?
         
@@ -417,15 +417,20 @@ final class NightscoutDataManager {
         } else {
             deviceStr = "loop://unknowndevice"
         }
+
         let direction: String? = {
             switch sensorState?.trendType {
             case .up?:
+                return "FortyFiveUp"
+            case .upUp?:
                 return "SingleUp"
-            case .upUp?, .upUpUp?:
+            case .upUpUp?:
                 return "DoubleUp"
             case .down?:
+                return "FortyFiveDown"
+            case .downDown?:
                 return "SingleDown"
-            case .downDown?, .downDownDown?:
+            case .downDownDown?:
                 return "DoubleDown"
             case .flat?:
                 return "Flat"
